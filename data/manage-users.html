@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Users</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav>
+        <div class="nav-container">
+            <a href="/" class="brand">User Management</a>
+            <ul class="nav-menu">
+                <li><a href="/">📄 Full Log</a></li>
+                <li><a href="add-user">➕ Add User</a></li>
+                <li><a href="manage-users">👤 Manage Users</a></li>
+            </ul>
+        </div>
+    </nav>
+    <div class="main-container">
+        <section class="main-section">
+            <h2>👤 User List</h2>
+            <table id="tableData">
+                <thead>
+                    <tr>
+                        <th>UID</th>
+                        <th>Role</th>
+                        <th>Name</th>
+                        <th>Delete</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Data from users.txt will be loaded here -->
+                </tbody>
+            </table>
+        </section>
+    </div>
+    <div class="main-container">
+        <a href="get?delete=users"><button class="button button-delete">🗑️ Delete users.txt File</button></a>
+    </div>
+    <script>
+        // JavaScript to load and parse users.txt
+        async function loadTableData() {
+            try {
+                const response = await fetch('view-users');
+                const data = await response.text();
+                const rows = data.trim().split('\n').slice(1); // Skip the header line
+
+                const tableBody = document.querySelector('#tableData tbody');
+                rows.forEach(row => {
+                    const columns = row.split(',');
+                    const tr = document.createElement('tr');
+
+                    // UID, Role, Name
+                    const uid = columns[0];
+                    const role = columns[1];
+                    const name = columns[2];
+
+                    [uid, role, name].forEach(val => {
+                        const td = document.createElement('td');
+                        td.textContent = val;
+                        tr.appendChild(td);
+                    });
+
+                    // Delete Button
+                    const tdDelete = document.createElement('td');
+                    const deleteLink = document.createElement('a');
+                    deleteLink.href = `get?delete-user=${uid}`;
+                    deleteLink.textContent = "❌ Delete";
+                    tdDelete.appendChild(deleteLink);
+                    tr.appendChild(tdDelete);
+
+                    tableBody.appendChild(tr);
+                });
+            } catch (error) {
+                console.error('Error loading user data:', error);
+            }
+        }
+
+        // Call the function to load user data
+        loadTableData();
+    </script>
+</body>
+</html>
