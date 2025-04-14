@@ -12,12 +12,15 @@
 #include <time.h>
 #include <WiFi.h>
 
-MFRC522DriverPinSimple ss_pin(10); // SDA
-MFRC522DriverSPI driver{ss_pin};
-MFRC522 mfrc522{driver};
+MFRC522DriverPinSimple ss_pin(10);  // SDA
+MFRC522DriverSPI driver{ ss_pin };
+MFRC522 mfrc522{ driver };
 
-const char* ssid = "MehmetAliPC";
-const char* password = "gokay5353";
+const char* ssid = "Xiaomi_13_Lite";
+const char* password = "123456789....";
+const int buzzerPin = 4;
+const int redLedPin = 5;
+const int greenLedPin = 6;
 
 long timezone = 0;
 byte daysavetime = 1;
@@ -43,20 +46,20 @@ void initRFIDReader() {
 }
 
 void initLittleFS() {
-  if(!LittleFS.begin()){
+  if (!LittleFS.begin()) {
     Serial.println("An Error has occurred while mounting LittleFS");
     return;
   }
-  if(!LittleFS.exists("/users.txt")) {
+  if (!LittleFS.exists("/users.txt")) {
     File file = LittleFS.open("/users.txt", FILE_WRITE);
-    if(file) {
+    if (file) {
       file.println("UID,Role,Name");
       file.close();
     }
   }
-  if(!LittleFS.exists("/log.txt")) {
+  if (!LittleFS.exists("/log.txt")) {
     File file = LittleFS.open("/log.txt", FILE_WRITE);
-    if(file) {
+    if (file) {
       file.println("Date,Time,UID,Role,Name");
       file.close();
     }
@@ -128,7 +131,7 @@ String getRoleFromFile(const char* filename, String uid) {
   return "";
 }
 
-String processor(const String& var){
+String processor(const String& var) {
   return String("HTTP GET request sent to your ESP on input field (" + inputParam + ") with value: " + inputMessage + "<br><a href=\"/\"><button class=\"button button-home\">Return to Home Page</button></a>");
 }
 
@@ -149,37 +152,45 @@ void deleteLineByUID(const char* path, String uidToDelete) {
 }
 
 void setup() {
+  pinMode(buzzerPin, OUTPUT);
+  digitalWrite(buzzerPin, LOW);
+  pinMode(redLedPin, OUTPUT);
+  pinMode(greenLedPin, OUTPUT);
+  digitalWrite(redLedPin, LOW);
+  digitalWrite(greenLedPin, LOW);
+
   Serial.begin(115200);
-  while (!Serial);
+  while (!Serial)
+    ;
   initRFIDReader();
   initLittleFS();
   initWifi();
   configTime(3600 * timezone, daysavetime * 3600, "time.nist.gov", "0.pool.ntp.org", "1.pool.ntp.org");
   initTime();
 
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
     request->send(LittleFS, "/full-log.html");
   });
 
-  server.on("/add-user", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/add-user", HTTP_GET, [](AsyncWebServerRequest* request) {
     request->send(LittleFS, "/add-user.html");
   });
 
-  server.on("/manage-users", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/manage-users", HTTP_GET, [](AsyncWebServerRequest* request) {
     request->send(LittleFS, "/manage-users.html");
   });
 
   server.serveStatic("/", LittleFS, "/");
 
-  server.on("/view-users", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/view-users", HTTP_GET, [](AsyncWebServerRequest* request) {
     request->send(LittleFS, "/users.txt", "text/plain");
   });
 
-  server.on("/view-log", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/view-log", HTTP_GET, [](AsyncWebServerRequest* request) {
     request->send(LittleFS, "/log.txt", "text/plain");
   });
 
-  server.on("/get", HTTP_GET, [] (AsyncWebServerRequest *request) {
+  server.on("/get", HTTP_GET, [](AsyncWebServerRequest* request) {
     if (request->hasParam(PARAM_INPUT_1) && request->hasParam(PARAM_INPUT_2) && request->hasParam(PARAM_INPUT_3)) {
       String uid = request->getParam(PARAM_INPUT_1)->value();
       String role = request->getParam(PARAM_INPUT_2)->value();
@@ -191,8 +202,7 @@ void setup() {
         file.println(inputMessage);
         file.close();
       }
-    }
-    else if (request->hasParam(PARAM_INPUT_4)) {
+    } else if (request->hasParam(PARAM_INPUT_4)) {
       String target = request->getParam(PARAM_INPUT_4)->value();
       inputParam = "delete";
       if (target == "log") {
@@ -200,12 +210,10 @@ void setup() {
       } else if (target == "users") {
         LittleFS.remove("/users.txt");
       }
-    }
-    else if (request->hasParam(PARAM_INPUT_5)) {
+    } else if (request->hasParam(PARAM_INPUT_5)) {
       String uidToDelete = request->getParam(PARAM_INPUT_5)->value();
       deleteLineByUID("/users.txt", uidToDelete);
-    }
-    else {
+    } else {
       inputMessage = "No message sent";
       inputParam = "none";
     }
@@ -239,24 +247,43 @@ void loop() {
   }
 
   time_t now = time(nullptr);
-  struct tm *tm_struct = localtime(&now);
+  struct tm* tm_struct = localtime(&now);
   char bufferDate[20], bufferTime[20];
   strftime(bufferDate, sizeof(bufferDate), "%Y-%m-%d", tm_struct);
   strftime(bufferTime, sizeof(bufferTime), "%H:%M:%S", tm_struct);
   String logEntry = String(bufferDate) + "," + String(bufferTime) + "," + uidString + "," + role + "," + name;
-if (!LittleFS.exists("/log.txt")) {
-  File newLog = LittleFS.open("/log.txt", FILE_WRITE);
-  if (newLog) {
-    newLog.println("Date,Time,UID,Role,Name");
-    newLog.close();
+  if (!LittleFS.exists("/log.txt")) {
+    File newLog = LittleFS.open("/log.txt", FILE_WRITE);
+    if (newLog) {
+      newLog.println("Date,Time,UID,Role,Name");
+      newLog.close();
+    }
   }
-}
 
-File logFile = LittleFS.open("/log.txt", FILE_APPEND);
-if (logFile) {
-  logFile.println(logEntry);
-  logFile.close();
-}
+  File logFile = LittleFS.open("/log.txt", FILE_APPEND);
+  if (logFile) {
+    logFile.println(logEntry);
+    logFile.close();
+  }
+  // LED ve buzzer kontrolü
+  if (role == "unknown") {
+    digitalWrite(redLedPin, HIGH);
+    for (int i = 0; i < 3; i++) {
+      digitalWrite(buzzerPin, HIGH);
+      delay(200);
+      digitalWrite(buzzerPin, LOW);
+      delay(200);
+    }
+    digitalWrite(redLedPin, LOW);
+  } else {
+    digitalWrite(greenLedPin, HIGH);
+    digitalWrite(buzzerPin, HIGH);
+    delay(200);
+    digitalWrite(buzzerPin, LOW);
+    delay(200);
+    digitalWrite(greenLedPin, LOW);
+  }
+
 
   delay(2500);
 }

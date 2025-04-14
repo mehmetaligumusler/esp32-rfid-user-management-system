@@ -13,7 +13,7 @@
             <ul class="nav-menu">
                 <li><a href="/">📄 Full Log</a></li>
                 <li><a href="add-user">➕ Add User</a></li>
-                <li><a href="manage-users">👤 Manage Users</a></li>
+                <li><a href="manage-users">👤 Manage Gokay Users</a></li>
             </ul>
         </div>
     </nav>
@@ -48,6 +48,9 @@
                 const rows = data.trim().split('\n').slice(1); // Skip the header line
 
                 const tableBody = document.querySelector('#tableData tbody');
+                // Clear existing table data before adding new rows
+                tableBody.innerHTML = '';
+                
                 rows.forEach(row => {
                     const columns = row.split(',');
                     const tr = document.createElement('tr');
@@ -62,8 +65,12 @@
                 console.error('Error loading log data:', error);
             }
         }
-        // Call the function to load log data
+
+        // İlk yükleme
         loadTableData();
+
+        // Her 2 saniyede bir tabloyu güncelle
+        setInterval(loadTableData, 2000);
     </script>
 </body>
 </html>
