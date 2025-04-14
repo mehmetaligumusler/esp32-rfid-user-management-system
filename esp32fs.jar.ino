@@ -223,10 +223,17 @@ void setup() {
   server.begin();
 }
 
+unsigned long lastReadTime = 0; // loop dışında global tanımla
+
 void loop() {
   if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
     return;
   }
+
+  // Okumalar arası minimum bekleme süresi (ms)
+  if (millis() - lastReadTime < 2500) return;
+  lastReadTime = millis();
+
   String uidString = "";
   for (byte i = 0; i < mfrc522.uid.size; i++) {
     if (mfrc522.uid.uidByte[i] < 0x10) {
@@ -252,6 +259,7 @@ void loop() {
   strftime(bufferDate, sizeof(bufferDate), "%Y-%m-%d", tm_struct);
   strftime(bufferTime, sizeof(bufferTime), "%H:%M:%S", tm_struct);
   String logEntry = String(bufferDate) + "," + String(bufferTime) + "," + uidString + "," + role + "," + name;
+
   if (!LittleFS.exists("/log.txt")) {
     File newLog = LittleFS.open("/log.txt", FILE_WRITE);
     if (newLog) {
@@ -265,6 +273,7 @@ void loop() {
     logFile.println(logEntry);
     logFile.close();
   }
+
   // LED ve buzzer kontrolü
   if (role == "unknown") {
     digitalWrite(redLedPin, HIGH);
@@ -283,7 +292,5 @@ void loop() {
     delay(200);
     digitalWrite(greenLedPin, LOW);
   }
-
-
-  delay(2500);
 }
+
