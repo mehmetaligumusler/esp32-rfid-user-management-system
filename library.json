@@ -1,0 +1,33 @@
+{
+  "name": "ESP32-RFID-Voice-Assistant",
+  "version": "1.0.0",
+  "description": "ESP32-S3 RFID User Management System with Voice Assistant",
+  "keywords": "esp32, rfid, voice-assistant, gemini, whisper, tts, tensorflow",
+  "dependencies": {
+    "MFRC522_ID": "^1.4.10",
+    "ESPAsyncWebServer-esphome": "^3.0.0",
+    "AsyncTCP-esphome": "^2.0.0",
+    "ArduinoJson": "^6.21.3",
+    "TensorFlowLite_ESP32": "^2.5.0",
+    "ESP32-audioI2S": "^2.0.7",
+    "SD": "",
+    "SPI": "",
+    "WiFi": "",
+    "HTTPClient": "",
+    "LittleFS": ""
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/esp32-rfid-voice-assistant"
+  },
+  "authors": [
+    {
+      "name": "Your Name",
+      "email": "your.email@example.com",
+      "maintainer": true
+    }
+  ],
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": ["espressif32"]
+} 

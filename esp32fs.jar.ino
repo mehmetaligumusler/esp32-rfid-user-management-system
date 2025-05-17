@@ -180,6 +180,10 @@ void setup() {
     request->send(LittleFS, "/manage-users.html");
   });
 
+  server.on("/voice-assistant", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send(LittleFS, "/voice-assistant.html");
+  });
+
   server.serveStatic("/", LittleFS, "/");
 
   server.on("/view-users", HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -218,6 +222,26 @@ void setup() {
       inputParam = "none";
     }
     request->send(LittleFS, "/get.html", "text/html", false, processor);
+  });
+
+  server.on("/update-voice-config", HTTP_GET, [](AsyncWebServerRequest* request) {
+    String message = "Voice assistant configuration updated";
+    
+    if (request->hasParam("threshold") && request->hasParam("duration") && request->hasParam("limit")) {
+      int threshold = request->getParam("threshold")->value().toInt();
+      int duration = request->getParam("duration")->value().toInt();
+      int limit = request->getParam("limit")->value().toInt();
+      
+      // In a real implementation, these values would be stored and passed to the voice assistant
+      Serial.printf("Voice Assistant Config: Threshold=%d, Duration=%d, Limit=%d\n", 
+                    threshold, duration, limit);
+      
+      message += String(" - Threshold: ") + threshold + 
+                 String(", Duration: ") + duration + 
+                 String(", Limit: ") + limit;
+    }
+    
+    request->send(200, "text/plain", message);
   });
 
   server.begin();

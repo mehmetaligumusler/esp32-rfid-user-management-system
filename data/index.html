@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32 RFID & Voice Assistant</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <style>
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    
+    .dashboard-card {
+      background-color: var(--white);
+      border-radius: 8px;
+      padding: 25px;
+      box-shadow: var(--card-shadow);
+      text-align: center;
+      transition: transform 0.3s ease;
+      text-decoration: none;
+      color: var(--dark-color);
+    }
+    
+    .dashboard-card:hover {
+      transform: translateY(-5px);
+    }
+    
+    .dashboard-card i {
+      font-size: 2.5rem;
+      color: var(--primary-color);
+      margin-bottom: 15px;
+    }
+    
+    .dashboard-card h2 {
+      font-size: 1.5rem;
+      margin-bottom: 10px;
+      color: var(--dark-color);
+    }
+    
+    .dashboard-card p {
+      color: var(--secondary-color);
+      font-size: 0.9rem;
+    }
+    
+    .welcome-section {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    
+    .welcome-section h1 {
+      font-size: 2rem;
+      color: var(--dark-color);
+      margin-bottom: 10px;
+    }
+    
+    .welcome-section p {
+      color: var(--secondary-color);
+      font-size: 1.1rem;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    
+    @media (max-width: 768px) {
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .welcome-section h1 {
+        font-size: 1.8rem;
+      }
+      
+      .welcome-section p {
+        font-size: 1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="nav-container">
+      <a href="/" class="brand">ESP32 RFID & Voice Assistant</a>
+      <ul class="nav-menu">
+        <li><a href="/"><i class="fas fa-home"></i> Home</a></li>
+        <li><a href="full-log.html"><i class="fas fa-clipboard-list"></i> Access Log</a></li>
+        <li><a href="add-user.html"><i class="fas fa-user-plus"></i> Add User</a></li>
+        <li><a href="manage-users.html"><i class="fas fa-users-cog"></i> Manage Users</a></li>
+        <li><a href="voice-assistant.html"><i class="fas fa-microphone-alt"></i> Voice Assistant</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="main-container">
+    <div class="welcome-section">
+      <h1>Welcome to ESP32 RFID & Voice Assistant</h1>
+      <p>Manage your RFID access control system and interact with the voice assistant through this intuitive dashboard.</p>
+    </div>
+
+    <div class="dashboard-grid">
+      <a href="full-log.html" class="dashboard-card">
+        <i class="fas fa-clipboard-list"></i>
+        <h2>Access Log</h2>
+        <p>View and manage all RFID access attempts with detailed timestamps and user information.</p>
+      </a>
+      
+      <a href="add-user.html" class="dashboard-card">
+        <i class="fas fa-user-plus"></i>
+        <h2>Add User</h2>
+        <p>Register new RFID cards with user names and assign appropriate access roles.</p>
+      </a>
+      
+      <a href="manage-users.html" class="dashboard-card">
+        <i class="fas fa-users-cog"></i>
+        <h2>Manage Users</h2>
+        <p>View, edit, or remove existing users from the system database.</p>
+      </a>
+      
+      <a href="voice-assistant.html" class="dashboard-card">
+        <i class="fas fa-microphone-alt"></i>
+        <h2>Voice Assistant</h2>
+        <p>Configure and interact with the voice assistant powered by LLM technology.</p>
+      </a>
+    </div>
+  </div>
+</body>
+</html>
