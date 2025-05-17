@@ -1,7 +1,6 @@
 /*
- * ESP32-S3 Voice Assistant with LLM Integration
- * Uses INMP441 I2S Microphone, Speaker, SD Card and Gemini Free API
- * Integrates with existing RFID access system
+ * ESP32-S3 Voice Assistant with RFID Card Access System
+ * Uses INMP441 I2S Microphone, Speaker, SD Card and Local API Server
  */
 
 #include <Arduino.h>
@@ -11,6 +10,7 @@
 #include <I2S.h>
 #include <SD.h>
 #include <SPI.h>
+#include <MFRC522.h>
 #include <TensorFlowLite_ESP32.h>
 #include "audio_provider.h"
 #include "command_responder.h"
@@ -23,15 +23,14 @@
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
-// Network credentials - update to match existing RFID project
+// Network credentials
 const char* ssid = "Xiaomi_13_Lite";
 const char* password = "123456789....";
 
-// Gemini API Configuration
-const char* GEMINI_API_KEY = "AIzaSyCheTPf70PepZQfuydwi7WUqG4WIuKE1kc";
-const char* GEMINI_API_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
-const bool USE_TURKISH = true; // Set to true for Turkish responses
-const int MAX_RESPONSE_SIZE = 2048;
+// API Endpoints
+const char* API_SERVER = "http://10.2.0.2:5000";  // Local server IP
+const char* API_TRANSCRIBE = "/transcribe";
+const char* API_RESPOND = "/respond";
 
 // Pin Definitions for ESP32-S3
 #define I2S_MIC_SERIAL_CLOCK      GPIO_NUM_5
@@ -45,6 +44,11 @@ const int MAX_RESPONSE_SIZE = 2048;
 #define SD_SCK                    GPIO_NUM_36
 #define SD_CS                     GPIO_NUM_34
 #define STATUS_LED                GPIO_NUM_47
+#define RFID_SS                   GPIO_NUM_21
+#define RFID_RST                  GPIO_NUM_22
+
+// RFID Initialization
+MFRC522 rfid(RFID_SS, RFID_RST);
 
 // Voice recognition parameters
 #define SAMPLE_RATE 16000
@@ -110,109 +114,97 @@ namespace {
   uint8_t tensor_arena[kTensorArenaSize];
 }
 
+// Authorized RFID cards (UID in hex format)
+const String AUTHORIZED_CARDS[] = {
+  "11223344",  // Example card 1
+  "55667788",  // Example card 2
+  "99AABBCC"   // Example card 3
+};
+const int NUM_AUTHORIZED_CARDS = 3;
+
 // Function prototypes
 void initMicrophone();
 void initSpeaker();
 void initSDCard();
+void initRFID();
 void initTensorFlow();
 void initWiFi();
 bool detectWakeWord();
 bool recordAudio(const char* filename, int recordSeconds);
-String transcribeAudio(const char* filename);
-String sendToGemini(const String& query);
-String parseGeminiResponse(const String& jsonResponse);
-bool textToSpeech(const String& text, const char* outputFile);
+bool sendAudioToServer(const char* filename);
+bool getResponseFromServer();
 void playAudioFile(const char* filename);
 void logEvent(const String& event);
-
-// Simple conversation history for context (1 entry)
-String lastQuery = "";
-String lastResponse = "";
+void checkRFID();
+bool isAuthorizedCard(String uid);
+void blinkLED(int times, int delayMs);
+void showProcessingStatus();
+void showErrorStatus();
+void showReadyStatus();
 
 void setup() {
   Serial.begin(115200);
-  delay(1000); // Give serial monitor time to open
+  delay(1000);
   
-  Serial.println("ESP32-S3 Sesli Asistan Başlatılıyor...");
+  Serial.println("ESP32-S3 Sesli Asistan ve RFID Sistemi Başlatılıyor...");
   
-  // Initialize status LED
   pinMode(STATUS_LED, OUTPUT);
   digitalWrite(STATUS_LED, LOW);
   
-  // Connect to Wi-Fi
   initWiFi();
-  
-  // Initialize microphone, speaker, SD card, and TensorFlow
   initMicrophone();
   initSpeaker();
   initSDCard();
+  initRFID();
   initTensorFlow();
   
-  logEvent("Sesli asistan sistemi başlatıldı");
-  
-  // Blink LED to indicate ready state
-  for (int i = 0; i < 3; i++) {
-    digitalWrite(STATUS_LED, HIGH);
-    delay(100);
-    digitalWrite(STATUS_LED, LOW);
-    delay(100);
-  }
+  logEvent("Sistem başlatıldı");
+  showReadyStatus();
 }
 
 void loop() {
+  // Check for RFID cards
+  checkRFID();
+  
   // Check for wake word
   if (detectWakeWord()) {
-    digitalWrite(STATUS_LED, HIGH); // Turn on LED to indicate listening
+    digitalWrite(STATUS_LED, HIGH);
     
     Serial.println("Uyandırma kelimesi algılandı: 'Hey Assistant'");
-    
-    // Play a sound to indicate wake word detected
     playAudioFile("/system/wake_detected.wav");
     
-    // Record user's query
-    if (recordAudio("/query.wav", 5)) { // Record for 5 seconds max
+    if (recordAudio("/query.wav", 5)) {
       logEvent("Ses kaydı tamamlandı");
+      Serial.println("Soru analiz ediliyor...");
       
-      // For development purposes, let's use a hardcoded query
-      // In a real implementation, we would use the transcribeAudio function
+      showProcessingStatus();
       
-      // Ask the user to speak
-      Serial.println("Sorunuzu söyleyin...");
-      
-      // Simulate a query (in production would come from transcribeAudio)
-      String query;
-      if (USE_TURKISH) {
-        query = "Bugün hava nasıl olacak?"; // Default query in Turkish
+      if (sendAudioToServer("/query.wav")) {
+        showProcessingStatus();
+        
+        if (getResponseFromServer()) {
+          playAudioFile("/response.wav");
+          blinkLED(2, 100);
+        } else {
+          Serial.println("Yanıt alınamadı");
+          showErrorStatus();
+        }
       } else {
-        query = "What's the weather today?"; // Default query in English
+        Serial.println("Ses dosyası sunucuya gönderilemedi");
+        showErrorStatus();
       }
-      
-      Serial.println("Algılanan Soru: " + query);
-      logEvent("Soru: " + query);
-      
-      // Get response from Gemini API
-      String response = sendToGemini(query);
-      logEvent("Gemini cevabı: " + response);
-      
-      // Store for conversation history
-      lastQuery = query;
-      lastResponse = response;
-      
-      // In a real implementation, we would convert text to speech here
-      // textToSpeech(response, "/response.wav");
-      // playAudioFile("/response.wav");
-      
-      // For now, just print the response
-      Serial.println("Asistan Cevabı: " + response);
+    } else {
+      Serial.println("Ses kaydı başarısız oldu");
+      showErrorStatus();
     }
     
-    digitalWrite(STATUS_LED, LOW); // Turn off LED
+    digitalWrite(STATUS_LED, LOW);
+    showReadyStatus();
   }
   
-  delay(100); // Short delay to prevent busy-waiting
+  delay(100);
 }
 
-// Initialize WiFi connection
 void initWiFi() {
   Serial.print("WiFi ağına bağlanılıyor: ");
   Serial.println(ssid);
@@ -220,13 +212,12 @@ void initWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   
-  // Wait for connection with timeout
   int timeout = 0;
   while (WiFi.status() != WL_CONNECTED && timeout < 20) {
     delay(500);
     Serial.print(".");
     timeout++;
-    digitalWrite(STATUS_LED, !digitalRead(STATUS_LED)); // Blink LED while connecting
+    digitalWrite(STATUS_LED, !digitalRead(STATUS_LED));
   }
   
   if (WiFi.status() == WL_CONNECTED) {
@@ -239,7 +230,6 @@ void initWiFi() {
   }
 }
 
-// Initialize I2S microphone
 void initMicrophone() {
   Serial.println("I2S mikrofon başlatılıyor...");
   esp_err_t err = i2s_driver_install(I2S_NUM_0, &i2s_mic_config, 0, NULL);
@@ -257,7 +247,6 @@ void initMicrophone() {
   Serial.println("I2S mikrofon başlatıldı");
 }
 
-// Initialize I2S speaker
 void initSpeaker() {
   Serial.println("I2S hoparlör başlatılıyor...");
   esp_err_t err = i2s_driver_install(I2S_NUM_1, &i2s_speaker_config, 0, NULL);
@@ -275,7 +264,6 @@ void initSpeaker() {
   Serial.println("I2S hoparlör başlatıldı");
 }
 
-// Initialize SD card
 void initSDCard() {
   Serial.println("SD kart başlatılıyor...");
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
@@ -285,7 +273,6 @@ void initSDCard() {
     return;
   }
   
-  // Create system directories if they don't exist
   if (!SD.exists("/system")) {
     SD.mkdir("/system");
   }
@@ -293,36 +280,35 @@ void initSDCard() {
   Serial.println("SD kart başlatıldı");
 }
 
-// Initialize TensorFlow Lite for wake word detection
+void initRFID() {
+  Serial.println("RFID okuyucu başlatılıyor...");
+  SPI.begin();
+  rfid.PCD_Init();
+  Serial.println("RFID okuyucu başlatıldı");
+}
+
 void initTensorFlow() {
   Serial.println("TensorFlow başlatılıyor...");
   
-  // Set up logging
   static tflite::MicroErrorReporter micro_error_reporter;
   error_reporter = &micro_error_reporter;
   
-  // Map the model into a usable data structure
   model = tflite::GetModel(g_tiny_conv_micro_features_model_data);
   
-  // Pull in only needed operations
   static tflite::MicroMutableOpResolver<4> micro_op_resolver;
   micro_op_resolver.AddDepthwiseConv2D();
   micro_op_resolver.AddFullyConnected();
   micro_op_resolver.AddSoftmax();
   micro_op_resolver.AddReshape();
   
-  // Build an interpreter to run the model
   static tflite::MicroInterpreter static_interpreter(
       model, micro_op_resolver, tensor_arena, kTensorArenaSize, error_reporter);
   interpreter = &static_interpreter;
   
-  // Allocate memory from the tensor_arena for the model's tensors
   interpreter->AllocateTensors();
   
-  // Get information about the memory area to use for the model's input
   model_input = interpreter->input(0);
   
-  // Set up feature provider and command recognizer
   static FeatureProvider static_feature_provider(kFeatureElementCount,
                                                feature_data);
   feature_provider = &static_feature_provider;
@@ -335,12 +321,9 @@ void initTensorFlow() {
   Serial.println("TensorFlow başlatıldı");
 }
 
-// Detect wake word using TensorFlow Lite
 bool detectWakeWord() {
-  // Get current time for determining if a command was recognized
   const int32_t current_time = millis();
   
-  // Fetch the spectrogram for the current time
   int how_many_new_slices = 0;
   TfLiteStatus feature_status = feature_provider->PopulateFeatureData(
       error_reporter, previous_time, current_time, &how_many_new_slices);
@@ -352,27 +335,22 @@ bool detectWakeWord() {
   
   previous_time = current_time;
   
-  // If not enough new data, return
   if (how_many_new_slices == 0) {
     return false;
   }
   
-  // Copy feature data to the input tensor
   for (int i = 0; i < kFeatureElementCount; i++) {
     model_input->data.f[i] = feature_data[i];
   }
   
-  // Run the model
   TfLiteStatus invoke_status = interpreter->Invoke();
   if (invoke_status != kTfLiteOk) {
     error_reporter->Report("Invoke failed");
     return false;
   }
   
-  // Get output tensor data
   TfLiteTensor* output = interpreter->output(0);
   
-  // Determine whether a command was recognized
   const char* found_command = nullptr;
   uint8_t score = 0;
   bool is_new_command = false;
@@ -384,7 +362,6 @@ bool detectWakeWord() {
     return false;
   }
   
-  // Return true if the wake word was detected
   if (is_new_command && (score > 200) && (strcmp(found_command, "hey_assistant") == 0)) {
     Serial.println("Wake word detected!");
     return true;
@@ -393,7 +370,6 @@ bool detectWakeWord() {
   return false;
 }
 
-// Record audio to SD card
 bool recordAudio(const char* filename, int recordSeconds) {
   Serial.printf("Ses kaydı başlatılıyor: %s...\n", filename);
   
@@ -403,30 +379,27 @@ bool recordAudio(const char* filename, int recordSeconds) {
     return false;
   }
   
-  // WAV file header
   uint8_t header[44];
-  // RIFF chunk descriptor
   memcpy(header, "RIFF", 4);
-  uint32_t fileSize = recordSeconds * SAMPLE_RATE * 2 + 36;  // 16-bit mono
+  uint32_t fileSize = recordSeconds * SAMPLE_RATE * 2 + 36;
   header[4] = (uint8_t)(fileSize & 0xFF);
   header[5] = (uint8_t)((fileSize >> 8) & 0xFF);
   header[6] = (uint8_t)((fileSize >> 16) & 0xFF);
   header[7] = (uint8_t)((fileSize >> 24) & 0xFF);
   memcpy(header + 8, "WAVE", 4);
   
-  // "fmt " subchunk
   memcpy(header + 12, "fmt ", 4);
-  uint32_t subchunk1Size = 16;  // PCM
+  uint32_t subchunk1Size = 16;
   header[16] = (uint8_t)(subchunk1Size & 0xFF);
   header[17] = (uint8_t)((subchunk1Size >> 8) & 0xFF);
   header[18] = (uint8_t)((subchunk1Size >> 16) & 0xFF);
   header[19] = (uint8_t)((subchunk1Size >> 24) & 0xFF);
   
-  uint16_t audioFormat = 1;  // PCM
+  uint16_t audioFormat = 1;
   header[20] = (uint8_t)(audioFormat & 0xFF);
   header[21] = (uint8_t)((audioFormat >> 8) & 0xFF);
   
-  uint16_t numChannels = 1;  // Mono
+  uint16_t numChannels = 1;
   header[22] = (uint8_t)(numChannels & 0xFF);
   header[23] = (uint8_t)((numChannels >> 8) & 0xFF);
   
@@ -436,13 +409,13 @@ bool recordAudio(const char* filename, int recordSeconds) {
   header[26] = (uint8_t)((sampleRate >> 16) & 0xFF);
   header[27] = (uint8_t)((sampleRate >> 24) & 0xFF);
   
-  uint32_t byteRate = SAMPLE_RATE * numChannels * 2;  // SampleRate * NumChannels * BitsPerSample/8
+  uint32_t byteRate = SAMPLE_RATE * numChannels * 2;
   header[28] = (uint8_t)(byteRate & 0xFF);
   header[29] = (uint8_t)((byteRate >> 8) & 0xFF);
   header[30] = (uint8_t)((byteRate >> 16) & 0xFF);
   header[31] = (uint8_t)((byteRate >> 24) & 0xFF);
   
-  uint16_t blockAlign = numChannels * 2;  // NumChannels * BitsPerSample/8
+  uint16_t blockAlign = numChannels * 2;
   header[32] = (uint8_t)(blockAlign & 0xFF);
   header[33] = (uint8_t)((blockAlign >> 8) & 0xFF);
   
@@ -450,40 +423,31 @@ bool recordAudio(const char* filename, int recordSeconds) {
   header[34] = (uint8_t)(bitsPerSample & 0xFF);
   header[35] = (uint8_t)((bitsPerSample >> 8) & 0xFF);
   
-  // "data" subchunk
   memcpy(header + 36, "data", 4);
-  uint32_t subchunk2Size = recordSeconds * SAMPLE_RATE * 2;  // NumSamples * NumChannels * BitsPerSample/8
+  uint32_t subchunk2Size = recordSeconds * SAMPLE_RATE * 2;
   header[40] = (uint8_t)(subchunk2Size & 0xFF);
   header[41] = (uint8_t)((subchunk2Size >> 8) & 0xFF);
   header[42] = (uint8_t)((subchunk2Size >> 16) & 0xFF);
   header[43] = (uint8_t)((subchunk2Size >> 24) & 0xFF);
   
-  // Write header to file
   audioFile.write(header, 44);
   
-  // Buffer for audio data
   int32_t buffer[BUFFER_SIZE];
   size_t bytes_read = 0;
   int16_t sample16[BUFFER_SIZE];
   
-  // Record for specified duration
   unsigned long startTime = millis();
   unsigned long endTime = startTime + (recordSeconds * 1000);
   
   while (millis() < endTime) {
-    // Read audio data from I2S
     i2s_read(I2S_NUM_0, buffer, sizeof(buffer), &bytes_read, portMAX_DELAY);
     
-    // Convert 32-bit samples to 16-bit
     for (int i = 0; i < BUFFER_SIZE; i++) {
-      // Convert 24-bit signed value to 16-bit signed value
       sample16[i] = buffer[i] >> 16;
     }
     
-    // Write audio data to file
     audioFile.write((const uint8_t *)sample16, BUFFER_SIZE * 2);
     
-    // Blink LED to indicate recording
     digitalWrite(STATUS_LED, !digitalRead(STATUS_LED));
   }
   
@@ -492,165 +456,154 @@ bool recordAudio(const char* filename, int recordSeconds) {
   return true;
 }
 
-// Send query to Gemini API and get response
-String sendToGemini(const String& query) {
+bool sendAudioToServer(const char* filename) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi bağlantısı yok!");
-    return "İnternet bağlantısı yok. Lütfen WiFi bağlantınızı kontrol edin.";
+    return false;
   }
   
-  Serial.println("Gemini API'ye sorgu gönderiliyor...");
+  Serial.println("Ses dosyası sunucuya gönderiliyor...");
   
-  // Prepare complete URL with API key
-  String url = String(GEMINI_API_ENDPOINT) + "?key=" + GEMINI_API_KEY;
+  if (!SD.exists(filename)) {
+    Serial.println("Ses dosyası bulunamadı");
+    return false;
+  }
   
-  // Create HTTP client
+  File audioFile = SD.open(filename);
+  if (!audioFile) {
+    Serial.println("Ses dosyası açılamadı");
+    return false;
+  }
+  
+  size_t fileSize = audioFile.size();
+  
   HTTPClient http;
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
+  String endpoint = String(API_SERVER) + API_TRANSCRIBE;
+  http.begin(endpoint);
   
-  // Create JSON payload
-  // If Turkish is enabled, append a language instruction
-  String systemInstruction = "";
-  if (USE_TURKISH) {
-    systemInstruction = "Sen bir Türkçe konuşan sesli asistandır. Türkçe cevap ver. ";
+  String boundary = "ESP32FormBoundary";
+  String contentType = "multipart/form-data; boundary=" + boundary;
+  http.addHeader("Content-Type", contentType);
+  
+  uint8_t *buffer = new uint8_t[1024];
+  if (!buffer) {
+    Serial.println("Bellek tahsis edilemedi");
+    audioFile.close();
+    return false;
   }
   
-  // Include conversation history if available
-  String fullQuery = query;
-  if (lastQuery.length() > 0 && lastResponse.length() > 0) {
-    fullQuery = systemInstruction + "Önceki konuşma: Kullanıcı: " + lastQuery + " Asistan: " + 
-                lastResponse + " Şimdi: Kullanıcı: " + query;
-  } else {
-    fullQuery = systemInstruction + query;
-  }
+  String startData = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n";
+  String endData = "\r\n--" + boundary + "--\r\n";
   
-  // Create JSON document
-  DynamicJsonDocument doc(1024);
-  JsonArray contents = doc.createNestedArray("contents");
-  JsonObject content = contents.createNestedObject();
-  JsonArray parts = content.createNestedArray("parts");
-  JsonObject part = parts.createNestedObject();
-  part["text"] = fullQuery;
+  http.setRequestTimeout(30000); 
   
-  // Serialize JSON to string
-  String payload;
-  serializeJson(doc, payload);
+  http.addHeader("Content-Length", String(startData.length() + fileSize + endData.length()));
   
-  Serial.println("API İsteği: " + payload);
+  WiFiClient *client = http.getStreamPtr();
   
-  // Send POST request
-  int httpResponseCode = http.POST(payload);
-  String response = "";
+  client->print(startData);
   
-  // Check response
-  if (httpResponseCode > 0) {
-    Serial.printf("HTTP Cevap kodu: %d\n", httpResponseCode);
-    response = http.getString();
-    Serial.println("Ham API cevabı: " + response);
+  size_t totalBytesRead = 0;
+  size_t bytesRead = 0;
+  audioFile.seek(0);
+  
+  while (totalBytesRead < fileSize) {
+    bytesRead = audioFile.read(buffer, 1024);
+    if (bytesRead == 0) break;
     
-    // Parse the JSON response
-    return parseGeminiResponse(response);
-  } else {
-    Serial.printf("HTTP Hata kodu: %d\n", httpResponseCode);
-    return "API'ye bağlanırken bir hata oluştu.";
+    client->write(buffer, bytesRead);
+    totalBytesRead += bytesRead;
+    
+    digitalWrite(STATUS_LED, !digitalRead(STATUS_LED));
   }
   
+  client->print(endData);
+  
+  delete[] buffer;
+  audioFile.close();
+  
+  int httpCode = http.POST("");
   http.end();
+  
+  if (httpCode == HTTP_CODE_OK) {
+    Serial.println("Ses dosyası başarıyla gönderildi");
+    return true;
+  } else {
+    Serial.printf("Ses dosyası gönderimi başarısız. HTTP kodu: %d\n", httpCode);
+    return false;
+  }
 }
 
-// Parse Gemini API response to extract the assistant's message
-String parseGeminiResponse(const String& jsonResponse) {
-  // Create a dynamic JSON document with enough capacity for the response
-  DynamicJsonDocument doc(MAX_RESPONSE_SIZE);
-  
-  // Parse the JSON response
-  DeserializationError error = deserializeJson(doc, jsonResponse);
-  
-  // Check for parsing errors
-  if (error) {
-    Serial.print("JSON ayrıştırma hatası: ");
-    Serial.println(error.c_str());
-    return "Yanıt ayrıştırılamadı. Hata: " + String(error.c_str());
+bool getResponseFromServer() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi bağlantısı yok!");
+    return false;
   }
   
-  // Extract the text response from the JSON structure
-  try {
-    // Navigate through the JSON structure to find the text content
-    // Structure: {"candidates":[{"content":{"parts":[{"text":"Response text"}]}}]}
-    
-    if (doc.containsKey("candidates") && doc["candidates"].is<JsonArray>()) {
-      JsonArray candidates = doc["candidates"].as<JsonArray>();
-      
-      if (candidates.size() > 0) {
-        JsonObject content = candidates[0]["content"];
-        
-        if (content.containsKey("parts") && content["parts"].is<JsonArray>()) {
-          JsonArray parts = content["parts"].as<JsonArray>();
-          
-          if (parts.size() > 0 && parts[0].containsKey("text")) {
-            String text = parts[0]["text"].as<String>();
-            return text;
-          }
-        }
-      }
+  Serial.println("Sunucudan yanıt alınıyor...");
+  
+  HTTPClient http;
+  String endpoint = String(API_SERVER) + API_RESPOND;
+  http.begin(endpoint);
+  
+  int httpCode = http.GET();
+  
+  if (httpCode == HTTP_CODE_OK) {
+    File responseFile = SD.open("/response.wav", FILE_WRITE);
+    if (!responseFile) {
+      Serial.println("Yanıt dosyası oluşturulamadı");
+      http.end();
+      return false;
     }
     
-    // If we get here, the JSON structure wasn't as expected
-    Serial.println("Beklenmeyen JSON yapısı");
-    return "Gemini yanıtı istenen formatta değil.";
+    WiFiClient *stream = http.getStreamPtr();
+    uint8_t buffer[1024];
+    size_t totalBytes = 0;
+    size_t bytesRead = 0;
     
-  } catch (const std::exception& e) {
-    Serial.printf("JSON ayrıştırma istisna hatası: %s\n", e.what());
-    return "JSON ayrıştırma sırasında bir hata oluştu.";
-  }
-}
-
-// Transcribe audio to text (not implemented - would require external API)
-String transcribeAudio(const char* filename) {
-  // In a real implementation, this function would send the audio file to a speech-to-text API
-  // and return the transcribed text. For this example, we'll return a placeholder.
-  
-  if (USE_TURKISH) {
-    return "Merhaba, bugün hava nasıl olacak?";
+    while (http.connected() && (totalBytes < http.getSize())) {
+      size_t available = stream->available();
+      if (available) {
+        size_t readSize = min(available, sizeof(buffer));
+        bytesRead = stream->readBytes(buffer, readSize);
+        responseFile.write(buffer, bytesRead);
+        totalBytes += bytesRead;
+        
+        digitalWrite(STATUS_LED, !digitalRead(STATUS_LED));
+      }
+      delay(1);
+    }
+    
+    responseFile.close();
+    Serial.println("Yanıt dosyası başarıyla kaydedildi");
+    http.end();
+    return true;
   } else {
-    return "Hello, what's the weather today?";
+    Serial.printf("Yanıt alınamadı. HTTP kodu: %d\n", httpCode);
+    http.end();
+    return false;
   }
 }
 
-// Convert text to speech (not implemented - would require external API)
-bool textToSpeech(const String& text, const char* outputFile) {
-  // This function would normally send the text to a TTS API and save the response
-  // to the specified output file. For this example, just return true.
-  Serial.println("Metin sese dönüştürülüyor (simüle edildi): " + text);
-  return true;
-}
-
-// Play audio file from SD card
 void playAudioFile(const char* filename) {
   Serial.printf("Ses dosyası çalınıyor: %s\n", filename);
   
-  // Check if file exists
   if (!SD.exists(filename)) {
     Serial.println("Ses dosyası bulunamadı");
     return;
   }
   
-  // Open the audio file
   File audioFile = SD.open(filename);
   if (!audioFile) {
     Serial.println("Ses dosyası açılamadı");
     return;
   }
   
-  // Skip WAV header (44 bytes)
   audioFile.seek(44);
   
-  // Buffer for audio data
-  uint8_t buffer[BUFFER_SIZE * 2]; // * 2 because 16-bit samples
+  uint8_t buffer[BUFFER_SIZE * 2];
   size_t bytes_written = 0;
   
-  // Read and play audio data
   while (audioFile.available()) {
     size_t bytesRead = audioFile.read(buffer, sizeof(buffer));
     i2s_write(I2S_NUM_1, buffer, bytesRead, &bytes_written, portMAX_DELAY);
@@ -660,9 +613,42 @@ void playAudioFile(const char* filename) {
   Serial.println("Ses çalma tamamlandı");
 }
 
-// Log event to SD card and serial monitor
+void checkRFID() {
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
+    return;
+  }
+  
+  String uid = "";
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    uid += (rfid.uid.uidByte[i] < 0x10 ? "0" : "") + String(rfid.uid.uidByte[i], HEX);
+  }
+  uid.toUpperCase();
+  
+  Serial.print("RFID Kart algılandı: ");
+  Serial.println(uid);
+  
+  if (isAuthorizedCard(uid)) {
+    logEvent("Yetkili kart algılandı: " + uid);
+    playAudioFile("/success.wav");
+  } else {
+    logEvent("Yetkisiz kart algılandı: " + uid);
+    playAudioFile("/unauthorized.wav");
+  }
+  
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+}
+
+bool isAuthorizedCard(String uid) {
+  for (int i = 0; i < NUM_AUTHORIZED_CARDS; i++) {
+    if (uid.equals(AUTHORIZED_CARDS[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void logEvent(const String& event) {
-  // Get current timestamp (approximate since we don't have RTC)
   unsigned long now = millis();
   unsigned long seconds = now / 1000;
   unsigned long minutes = seconds / 60;
@@ -675,10 +661,8 @@ void logEvent(const String& event) {
   char timestamp[20];
   sprintf(timestamp, "%02lu:%02lu:%02lu", hours, minutes, seconds);
   
-  // Format log entry
   String logEntry = String(timestamp) + " - " + event;
   
-  // Open log file on SD card
   if (SD.exists("/assistant_log.txt")) {
     File logFile = SD.open("/assistant_log.txt", FILE_APPEND);
     if (logFile) {
@@ -686,7 +670,6 @@ void logEvent(const String& event) {
       logFile.close();
     }
   } else {
-    // Create new log file
     File logFile = SD.open("/assistant_log.txt", FILE_WRITE);
     if (logFile) {
       logFile.println("Zaman - Olay");
@@ -695,6 +678,41 @@ void logEvent(const String& event) {
     }
   }
   
-  // Also print to serial console
   Serial.println(logEntry);
+}
+
+void blinkLED(int times, int delayMs) {
+  for (int i = 0; i < times; i++) {
+    digitalWrite(STATUS_LED, HIGH);
+    delay(delayMs);
+    digitalWrite(STATUS_LED, LOW);
+    delay(delayMs);
+  }
+}
+
+void showProcessingStatus() {
+  for (int i = 0; i < 5; i++) {
+    digitalWrite(STATUS_LED, HIGH);
+    delay(50);
+    digitalWrite(STATUS_LED, LOW);
+    delay(50);
+  }
+}
+
+void showErrorStatus() {
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(STATUS_LED, HIGH);
+    delay(300);
+    digitalWrite(STATUS_LED, LOW);
+    delay(300);
+  }
+}
+
+void showReadyStatus() {
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(STATUS_LED, HIGH);
+    delay(100);
+    digitalWrite(STATUS_LED, LOW);
+    delay(100);
+  }
 } 

@@ -17,7 +17,7 @@ MFRC522DriverSPI driver{ ss_pin };
 MFRC522 mfrc522{ driver };
 
 const char* ssid = "Xiaomi_13_Lite";
-const char* password = "123456789....";
+const char* password = "123456789.....";
 const int buzzerPin = 4;
 const int redLedPin = 5;
 const int greenLedPin = 6;
